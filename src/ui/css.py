@@ -1,10 +1,10 @@
 """Color tokens, global CSS string, and inject_css() helper for Streamlit pages.
 
 Defines the COLORS dict (primary navy, accent gold, risk-level colors, and
-neutral palette), DIVERGING_SCALE and CHART_PALETTE lists, and GLOBAL_CSS
-which imports Source Sans 3 and IBM Plex Mono from Google Fonts and applies
-the design system layout rules.  The inject_css() function injects GLOBAL_CSS
-via st.html().
+neutral palette), the DIVERGING_SCALE, POSITION_SCALE and CHART_PALETTE
+lists, and GLOBAL_CSS which imports Source Sans 3 and IBM Plex Mono from
+Google Fonts and applies the design system layout rules.  The inject_css()
+function injects GLOBAL_CSS via st.html().
 
 Note: CSS class names use the 'shai-' prefix for visual fidelity to the SHAI
 reference design; only the brand mark is replaced with 'KSS'.
@@ -56,18 +56,34 @@ DIVERGING_SCALE = [
     "#12496F",
 ]
 
-# Sequential scale for *levels* — relative position against the national mean.
-# Deliberately not DIVERGING_SCALE: a diverging palette implies a meaningful
-# midpoint, and an index level has none.  Single hue, pale to saturated, so
-# "darker is higher" reads without a legend.  See METHODOLOGY §13.4.
-SEQUENTIAL_SCALE = [
-    "#F2F5F9",
-    "#D6E0EC",
-    "#B0C4DC",
-    "#84A2C6",
-    "#5A7FBD",
-    "#3D5F94",
-    "#28406B",
+# Diverging scale for *position* — a kommun's index against the national mean.
+# This replaced a single-hue sequential ramp on 2026-09-12.  The argument for
+# the sequential ramp was that a diverging palette implies a meaningful
+# midpoint and an index level has none; that was wrong about this index.
+# Riket = 100 is a real midpoint, because the only thing the number says is
+# whether a kommun sits above or below the national average.  What the ramp
+# must not do is imply that below is *bad*, which is the retired
+# vulnerability claim, so the endpoints are not red and green.
+#
+# ColorBrewer PRGn: purple below 100, green above, neutral at 100.  Purple and
+# green stay separable under red-green colour deficiency, and the pair is
+# distinct from DIVERGING_SCALE's orange-blue, so a reader can tell the two
+# map layers apart at a glance while toggling between them.
+#
+# The five colours are anchored to explicit domain stops rather than stretched
+# evenly, so the neutral lands on 100 exactly and the two outer steps fall on
+# the POSITION_BANDS cuts.  See MAP_LAYERS in src/ui/choropleth.py.
+POSITION_SCALE = [
+    # Stop 80: deep purple.
+    "#6A4C93",
+    # Stop 90: light purple, the "under 90" band cut.
+    "#B9A5D6",
+    # Stop 100: neutral, riket.
+    "#EEF0F3",
+    # Stop 110: sage, the "over 110" band cut.
+    "#A8C4A4",
+    # Stop 130: deep green.
+    "#2E7D5B",
 ]
 
 CHART_PALETTE = [

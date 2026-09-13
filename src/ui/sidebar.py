@@ -15,7 +15,7 @@ All label strings come from SWEDISH_LABELS in src/ui/labels.py.
 
 import streamlit as st
 
-from src.ui.css import COLORS, SEQUENTIAL_SCALE
+from src.ui.css import COLORS, POSITION_SCALE
 from src.ui.labels import POSITION_BANDS, SWEDISH_LABELS
 
 
@@ -32,12 +32,16 @@ _NAV_ITEMS = [
 #: Highest band first, so the pills read top-down like the legend.
 _BAND_OPTIONS = [band.label for band in reversed(POSITION_BANDS)]
 
-#: Swatches taken from the map's sequential ramp, so the sidebar and the
-#: choropleth agree that darker means higher.
+#: Swatches taken from the map's position ramp, so a band pill and the
+#: kommuner it selects are the same colour.  The indices are the ramp's own
+#: band cuts: POSITION_SCALE is anchored at 80/90/100/110/130, so entry 4 is
+#: the colour above 110, entry 2 the neutral at riket, and entry 0 the colour
+#: below 90.  The neutral is near-white, which is invisible on a white card
+#: and legible on this navy sidebar; that is why it is only used here.
 _BAND_LEGEND = [
-    (SEQUENTIAL_SCALE[5], POSITION_BANDS[2].label),
-    (SEQUENTIAL_SCALE[3], POSITION_BANDS[1].label),
-    (SEQUENTIAL_SCALE[1], POSITION_BANDS[0].label),
+    (POSITION_SCALE[4], POSITION_BANDS[2].label),
+    (POSITION_SCALE[2], POSITION_BANDS[1].label),
+    (POSITION_SCALE[0], POSITION_BANDS[0].label),
 ]
 
 

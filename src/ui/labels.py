@@ -272,11 +272,16 @@ SWEDISH_LABELS = {
     "map_layer_label": "Vad kartan visar",
     "map_layer_position": "Nuvarande position",
     "map_layer_drift": "Förflyttning 5 år",
-    "map_legend_position": "Index mot riksgenomsnittet · mörkare = högre",
+    "map_legend_position": "Index mot riksgenomsnittet · grönt = över riket",
     "map_legend_drift": "Indexenheter, 5 år · orange = sjunkit mot riket",
     "map_legend_position_full": (
         "Kommunens skattekraft i procent av det oviktade riksgenomsnittet. "
-        "Mörkare blå = högre. Skalan är beskuren vid 80 och 130, eftersom "
+        "Skalan vänder vid 100, alltså vid riksgenomsnittet: grönt betyder "
+        "att kommunen ligger över riket, lila att den ligger under, och den "
+        "ljusa mitten att den ligger nära. Färgen byter också vid 90 och 110, "
+        "samma gränser som filtret i sidopanelen. Att ligga under riket är "
+        "ett läge, inte ett omdöme: måttet säger var kommunen står, inte om "
+        "den är illa ställd. Skalan är beskuren vid 80 och 130, eftersom "
         "mediankommunen ligger på 97 och den högsta på 208. En obeskuren "
         "skala skulle ge nio kommuner av tio samma färg."
     ),
@@ -779,16 +784,17 @@ SWEDISH_LABELS = {
     "explain_choropleth_expander": "Hur läser jag kartan?",
     "explain_choropleth_text": (
         "Kartan visar alla 290 kommuner. Vad färgen betyder beror på vilket "
-        "lager du valt ovanför kartan, och de två skalorna är avsiktligt "
-        "olika. Nuvarande position är en nivå: mörkare blått betyder högre "
-        "skattekraft mot riksgenomsnittet, och skalan är beskuren vid 80 och "
-        "130 eftersom mediankommunen ligger på 97 och den högsta på 208. "
-        "Förflyttning 5 år är en förändring med ett tecken: orange betyder "
-        "att kommunens index sjunkit i förhållande till riket, blått att det "
-        "stigit, och skalan är centrerad på noll."
+        "lager du valt ovanför kartan. Båda skalorna vänder på mitten, men de "
+        "vänder vid olika tal och i olika färger, så att du ser vilket lager "
+        "som är på skärmen. Nuvarande position är en nivå och vänder vid 100: "
+        "grönt över riksgenomsnittet, lila under, ljust nära. Skalan är "
+        "beskuren vid 80 och 130 eftersom mediankommunen ligger på 97 och den "
+        "högsta på 208. Förflyttning 5 år är en förändring med ett tecken och "
+        "vänder vid noll: orange betyder att kommunens index sjunkit i "
+        "förhållande till riket, blått att det stigit."
         "\n\n"
-        "Exempel: i positionslagret framträder Stockholmsregionen mörk och "
-        "delar av inlandet ljusa, nivåskillnader som ligger fast över "
+        "Exempel: i positionslagret framträder Stockholmsregionen grön och "
+        "delar av inlandet lila, nivåskillnader som ligger fast över "
         "decennier. I förflyttningslagret ser samma karta helt annorlunda ut, "
         "eftersom en kommun kan ligga lågt och ändå stiga i index. Håll "
         "muspekaren över en kommun för att se båda talen."
@@ -797,14 +803,27 @@ SWEDISH_LABELS = {
     "explain_histogram_text": (
         "Histogrammet visar samma storhet som kartan och byter när du byter "
         "lager. Varje stapel är ett intervall, och höjden anger hur många av "
-        "de 290 kommunerna som hamnar där. Den streckade linjen markerar "
-        "riksgenomsnittet: index 100 för en nivå, noll för en förflyttning."
+        "de 290 kommunerna som hamnar där. Staplarna har samma färger som "
+        "kartan, så en stapel och de kommuner den räknar har samma nyans. Den "
+        "streckade linjen markerar riksgenomsnittet: index 100 för en nivå, "
+        "noll för en förflyttning. Den gula linjen markerar medianen, alltså "
+        "den mittersta kommunen."
         "\n\n"
         "Exempel: i positionslagret är fördelningen kraftigt högerskev. De "
         "flesta kommuner ligger tätt mellan 85 och 110, och en tunn svans "
-        "sträcker sig upp mot 208. Det är därför kartans färgskala är "
-        "beskuren. Utan beskärning skulle nio kommuner av tio få samma färg."
+        "sträcker sig upp mot 208. Därför ligger medianen under 100 fastän "
+        "medelvärdet är 100 per konstruktion, och därför är färgskalan "
+        "beskuren. Utan beskärning skulle nio kommuner av tio få samma färg. "
+        "Kommuner utanför skalan räknas in i ytterstaplarna, som säger det "
+        "när du håller muspekaren över dem."
     ),
+    # Histogram bin labels.  The end bins also hold every kommun outside
+    # the scale, so they are named for what they contain rather than for
+    # the interval they happen to span.
+    "hist_bin_range": "{low} till {high}",
+    "hist_bin_low": "{high} och lägre",
+    "hist_bin_high": "{low} och högre",
+    "hist_median": "Median {value}",
     "explain_trend_expander": "Hur läser jag trenddiagrammet?",
     # The span was written as "2010 till 2024" and the chart has plotted to
     # 2026 since skattekraft gained two years. It is formatted from the panel.

@@ -37,7 +37,13 @@ st.set_page_config(
 
 from src.provenance import analysis_year, panel_max_year  # noqa: E402
 from src.ui.chart_theme import get_chart_layout  # noqa: E402
-from src.ui.choropleth import MAP_LAYERS, render_choropleth, resolve_layer  # noqa: E402
+from src.ui.choropleth import (  # noqa: E402
+    MAP_LAYERS,
+    build_colormap,
+    color_for,
+    render_choropleth,
+    resolve_layer,
+)
 from src.ui.components import (  # noqa: E402
     card_header,
     footer_note,
@@ -278,32 +284,107 @@ with col_hist:
             )
         )
 
-        # The histogram follows the map: same quantity, same units, so the two
-        # cannot disagree about what is being shown.
-        hist_values = filtered_df[active_layer.column]
+        # The histogram follows the map: same quantity, same units, and now
+        # the same colours, so a bar and the kommuner it counts are one shade.
+        hist_values = filtered_df[active_layer.column].dropna()
+
+        # Binned here rather than by go.Histogram, for two reasons.  The bins
+        # span the layer's own clipped domain, so the chart stops where the
+        # map stops instead of stretching its axis out to the 208 outlier.
+        # And go.Histogram bins in the browser, which leaves no bin centre on
+        # the Python side to take a colour from.
+        _NBINS = 30
+        _lo, _hi = active_layer.vmin, active_layer.vmax
+        _step = (_hi - _lo) / _NBINS
+        _edges = [_lo + i * _step for i in range(_NBINS + 1)]
+        _counts = [0] * _NBINS
+        for _v in hist_values:
+            _counts[min(max(int((_v - _lo) / _step), 0), _NBINS - 1)] += 1
+
+        # Kommuner outside the domain are counted in the end bins, so the bars
+        # still sum to 290.  The end bins say so in their hover text rather
+        # than passing the pooled kommuner off as an ordinary interval.
+        _n_below = int((hist_values < _lo).sum())
+        _n_above = int((hist_values > _hi).sum())
+
+        _centers = [(_edges[i] + _edges[i + 1]) / 2 for i in range(_NBINS)]
+        _cmap = build_colormap(active_layer)
+        _bar_colors = [color_for(active_layer, c, _cmap) for c in _centers]
+
+        def _bin_num(value: float) -> str:
+            text = f"{value:+.1f}" if active_layer.signed else f"{value:.1f}"
+            return text.replace(".", ",")
+
+        _bin_labels = [
+            SWEDISH_LABELS["hist_bin_range"].format(
+                low=_bin_num(_edges[i]), high=_bin_num(_edges[i + 1])
+            )
+            for i in range(_NBINS)
+        ]
+        if _n_below:
+            _bin_labels[0] = SWEDISH_LABELS["hist_bin_low"].format(
+                high=_bin_num(_edges[1])
+            )
+        if _n_above:
+            _bin_labels[-1] = SWEDISH_LABELS["hist_bin_high"].format(
+                low=_bin_num(_edges[-2])
+            )
 
         fig_hist = go.Figure()
         fig_hist.add_trace(
-            go.Histogram(
-                x=hist_values,
-                nbinsx=30,
-                marker_color=COLORS["secondary"],
+            go.Bar(
+                x=_centers,
+                y=_counts,
+                width=_step * 0.92,
+                marker=dict(
+                    color=_bar_colors,
+                    line=dict(width=0.5, color="rgba(26, 26, 46, 0.25)"),
+                ),
+                customdata=[[label] for label in _bin_labels],
                 hovertemplate=(
-                    f"{active_layer.label}: %{{x:.1f}}<br>"
+                    "<b>%{customdata[0]}</b><br>"
                     + SWEDISH_LABELS["axis_kommuner_count"]
                     + ": %{y}<extra></extra>"
                 ),
             )
         )
 
-        # Reference line: the national mean for a level, zero for a signed
-        # quantity.  Drawing a zero line on an index would be meaningless.
+        # The band cuts the map changes colour at, and the sidebar pills
+        # filter on.  A signed layer has none, so this draws nothing for drift.
+        for _cut in active_layer.legend_ticks:
+            fig_hist.add_vline(
+                x=_cut,
+                line_dash="dot",
+                line_width=1,
+                line_color=COLORS["text_tertiary"],
+            )
+
+        # Reference line: the national mean for a level, zero for a movement.
+        # Both are the layer's own midpoint, which is where its ramp turns.
         fig_hist.add_vline(
-            x=0 if active_layer.diverging else 100,
+            x=active_layer.midpoint,
             line_dash="dash",
             line_width=1,
             line_color=COLORS["text_secondary"],
         )
+
+        # The median, which is the fact the reference line hides: on the
+        # position layer the distribution is right-skewed, so the typical
+        # kommun sits below riket even though the mean is 100 by construction.
+        if not hist_values.empty:
+            _median = float(hist_values.median())
+            fig_hist.add_vline(
+                x=_median,
+                line_dash="solid",
+                line_width=1.5,
+                line_color=COLORS["accent"],
+                annotation_text=SWEDISH_LABELS["hist_median"].format(
+                    value=_bin_num(_median)
+                ),
+                annotation_position="top left",
+                annotation_font_size=10,
+                annotation_font_color=COLORS["text_secondary"],
+            )
 
         hist_layout = get_chart_layout(
             height=400,
@@ -311,6 +392,9 @@ with col_hist:
             yaxis_title=SWEDISH_LABELS["axis_kommuner_count"],
             showlegend=False,
         )
+        # Pin the axis to the layer's domain, so the bars line up with the
+        # legend above the map rather than floating on an auto-fitted range.
+        hist_layout["xaxis"]["range"] = [_lo, _hi]
         fig_hist.update_layout(**hist_layout)
         st.plotly_chart(
             fig_hist,

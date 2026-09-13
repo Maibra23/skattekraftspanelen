@@ -4,8 +4,12 @@ Run scripts/download_geojson.py once before first use to populate data/geo/.
 
 render_choropleth(data, layer, height, key) creates a polygon-based Folium map
 using data/geo/kommuner.geojson (from okfse/sweden-geojson).  Two layers are
-offered: relative position on a sequential ramp, and five-year drift on a
-diverging one centred at zero.  Map height is 480 px.  Tooltips show
+offered, both on diverging ramps but around different midpoints: relative
+position is centred on riket = 100, five-year drift on zero.  Each layer
+anchors its colours to explicit domain stops, so the neutral colour lands on
+the midpoint exactly rather than halfway along the bar.  Map height is 480 px.
+build_colormap() and color_for() are public so that a chart showing the same
+quantity can be tinted from the same ramp.  Tooltips show
 municipality name and key metrics.  The map is embedded in Streamlit via
 streamlit_folium.st_folium().  Basemap tiles come from Esri's light grey
 canvas, which needs no API key.
@@ -23,11 +27,12 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 
-from src.ui.css import COLORS, DIVERGING_SCALE, SEQUENTIAL_SCALE
+from src.ui.css import COLORS, DIVERGING_SCALE, POSITION_SCALE
 from src.ui.labels import SWEDISH_LABELS, format_pct, format_sek
 
 #: DIVERGING_SCALE runs orange (low) to blue (high), which is the right
 #: direction for drift: falling behind reads warm, gaining reads cool.
+#: POSITION_SCALE runs purple (below riket) to green (above).
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _GEOJSON_PATH = _PROJECT_ROOT / "data" / "geo" / "kommuner.geojson"
 
@@ -52,6 +57,21 @@ _MAP_ZOOM_START = 5
 # ---------------------------------------------------------------------------
 
 
+def even_stops(vmin: float, vmax: float, n: int) -> list[float]:
+    """Return n domain stops spread evenly from vmin to vmax.
+
+    Args:
+        vmin: First stop.
+        vmax: Last stop.
+        n: Number of stops, which must equal the number of colours.
+
+    Returns:
+        A strictly increasing list of n floats.
+    """
+    step = (vmax - vmin) / (n - 1)
+    return [vmin + i * step for i in range(n)]
+
+
 @dataclass(frozen=True)
 class MapLayer:
     """One selectable choropleth layer.
@@ -61,10 +81,27 @@ class MapLayer:
         column: The column of the merged frame this layer colours by.
         label: Swedish radio-button label.
         colors: Colour ramp, low value first.
+        stops: The domain value each colour is anchored at, one per colour,
+            strictly increasing, running from vmin to vmax. Anchoring is what
+            lets the neutral colour sit on the midpoint rather than halfway
+            along the bar: the position ramp spans 80 to 130, so its midpoint
+            of 100 falls two fifths of the way across, not at the centre.
         vmin: Value mapped to the first colour; values below are clipped.
         vmax: Value mapped to the last colour; values above are clipped.
-        diverging: Whether the scale has a meaningful midpoint. Signed
-            quantities do; levels do not.
+        midpoint: The value the neutral colour sits on, and the value drawn
+            for a kommun with no data. Every layer here has one, but they are
+            not the same: a level is centred on riket = 100, a movement on
+            zero. This used to be a diverging bool, which conflated "has a
+            midpoint" with "that midpoint is zero", and so could not describe
+            a level at all.
+        signed: Whether the quantity carries a meaningful sign, so that the
+            legend labels read +4 / 0 / -4 rather than 80 / 100 / 130.
+        legend_ticks: Extra values to mark on the legend bar, beyond the two
+            ends and the midpoint. Only for cuts a reader can act on: the
+            position ramp marks the POSITION_BANDS cuts at 90 and 110, which
+            are the same cuts the sidebar pills filter on. A drift ramp has
+            none, because its inner stops are interpolation points and mean
+            nothing on their own.
         legend_caption: Caption under the legend gradient.
         decimals: Digits shown in the tooltip.
     """
@@ -73,42 +110,122 @@ class MapLayer:
     column: str
     label: str
     colors: list[str]
+    stops: list[float]
     vmin: float
     vmax: float
-    diverging: bool
+    midpoint: float
+    signed: bool
     legend_caption: str
+    legend_ticks: tuple[float, ...] = ()
     decimals: int = 1
 
 
-#: The three layers the plan specifies. Position and drift must never share a
-#: palette: position is a level on a sequential ramp, drift is signed and
-#: centred on zero. Reusing the vulnerability palette for drift would imply
-#: that a falling kommun is "high risk", which is a different claim.
+#: The two layers the plan specifies. Both diverge, but around different
+#: midpoints and in different hues, and that separation is deliberate:
+#: position is a level centred on riket = 100, drift is a signed movement
+#: centred on zero. They must never share a palette, because a reader toggling
+#: between them has to be able to tell which one is on screen. Neither ramp
+#: ends in red and green, which would restate the retired vulnerability claim
+#: that a low tax base is a high risk.
 MAP_LAYERS: dict[str, MapLayer] = {
     "position": MapLayer(
         key="position",
         column="relative_position",
         label=SWEDISH_LABELS["map_layer_position"],
-        colors=SEQUENTIAL_SCALE,
+        colors=POSITION_SCALE,
+        # Not evenly spaced. The domain is clipped to 80-130, which is not
+        # symmetric about 100, so even spacing would drop the neutral colour
+        # on 105 and paint every kommun between 100 and 105 as though it sat
+        # below the national average. The inner stops fall on the
+        # POSITION_BANDS cuts, so the map changes colour where the sidebar
+        # pills change band.
+        stops=[80.0, 90.0, 100.0, 110.0, 130.0],
         # Clipped to the body of the distribution: the median kommun sits at
         # 96.6 and the maximum at 208, so an unclipped ramp would render nine
         # kommuner in ten as one indistinguishable colour.
         vmin=80.0,
         vmax=130.0,
-        diverging=False,
+        midpoint=100.0,
+        signed=False,
         legend_caption=SWEDISH_LABELS["map_legend_position"],
+        legend_ticks=(90.0, 110.0),
     ),
     "drift": MapLayer(
         key="drift",
         column="drift_5y",
         label=SWEDISH_LABELS["map_layer_drift"],
         colors=DIVERGING_SCALE,
+        # Symmetric about zero, so even spacing already puts the neutral
+        # colour on the midpoint.
+        stops=even_stops(-4.0, 4.0, len(DIVERGING_SCALE)),
         vmin=-4.0,
         vmax=4.0,
-        diverging=True,
+        midpoint=0.0,
+        signed=True,
         legend_caption=SWEDISH_LABELS["map_legend_drift"],
     ),
 }
+
+
+def build_colormap(layer: MapLayer) -> cm.LinearColormap:
+    """Return the branca colormap a layer paints with.
+
+    The colours are anchored to layer.stops rather than stretched evenly
+    across the domain, which is what puts the neutral colour on the midpoint.
+
+    Args:
+        layer: The layer to build a ramp for.
+
+    Returns:
+        A LinearColormap over [layer.vmin, layer.vmax].
+
+    Raises:
+        ValueError: If the layer's stops are not strictly increasing, or do
+            not match its colours one for one. branca fails obscurely on both,
+            so they are caught here.
+    """
+    if len(layer.stops) != len(layer.colors):
+        raise ValueError(
+            f"{layer.key}: {len(layer.stops)} stops for {len(layer.colors)} colours"
+        )
+    if any(b <= a for a, b in zip(layer.stops, layer.stops[1:])):
+        raise ValueError(f"{layer.key}: stops must increase, got {layer.stops}")
+    return cm.LinearColormap(
+        colors=list(layer.colors),
+        index=list(layer.stops),
+        vmin=layer.vmin,
+        vmax=layer.vmax,
+        caption=layer.legend_caption,
+    )
+
+
+def color_for(
+    layer: MapLayer,
+    value: "float | None",
+    colormap: "cm.LinearColormap | None" = None,
+) -> str:
+    """Return the colour a layer paints one value with.
+
+    The single place a value becomes a colour, so that the map and any chart
+    of the same quantity cannot drift apart. Values outside the layer's domain
+    are clipped to its ends, and a missing value is drawn at the midpoint.
+
+    Args:
+        layer: The layer whose ramp to use.
+        value: The value to colour. None and NaN are treated as missing.
+        colormap: A ramp already built for this layer. Pass one when colouring
+            many values, to avoid rebuilding it per value.
+
+    Returns:
+        A six-digit hex colour. branca returns eight digits, with an alpha
+        byte these ramps never vary; Plotly does not accept that form, so the
+        alpha is dropped here rather than at each call site.
+    """
+    cmap = colormap if colormap is not None else build_colormap(layer)
+    if value is None or pd.isna(value):
+        value = layer.midpoint
+    clipped = max(layer.vmin, min(layer.vmax, float(value)))
+    return cmap(clipped)[:7]
 
 
 def resolve_layer(selection: str) -> MapLayer:
@@ -226,37 +343,27 @@ def render_choropleth(
 
     lookup = df.set_index("kommun_kod").to_dict("index")
 
-    # Build linear colormap from the selected layer
-    colormap = cm.LinearColormap(
-        colors=map_layer.colors,
-        vmin=map_layer.vmin,
-        vmax=map_layer.vmax,
-        caption=map_layer.legend_caption,
-    )
-
-    # Value used when a kommun has no data for this layer: the midpoint of a
-    # diverging scale is meaningful (zero drift), the low end of a sequential
-    # one is not, so an absent level is drawn at the bottom of the ramp.
-    fallback = 0.0 if map_layer.diverging else map_layer.vmin
+    # Build the ramp once and reuse it for all 290 polygons.
+    colormap = build_colormap(map_layer)
 
     # Create base map centered on Sweden
     m = build_base_map()
 
-    # Style function
+    # Style function.  A kommun with no value for this layer is drawn at the
+    # layer's midpoint by color_for, which is the only neutral a diverging
+    # ramp has: painting it at the bottom of the ramp would assert that it
+    # sits far below riket, which is a claim about missing data.
     def style_function(feature):
         kod = _extract_kommun_kod(feature)
         row = lookup.get(kod, {})
-        value = row.get(map_layer.column, fallback)
-        if value is None or pd.isna(value):
-            value = fallback
-        fill_color = colormap(
-            max(map_layer.vmin, min(map_layer.vmax, float(value)))
-        )
         return {
-            "fillColor": fill_color,
-            "color": "#FFFFFF",
+            "fillColor": color_for(map_layer, row.get(map_layer.column), colormap),
+            # Not white.  Both ramps are near-white at the midpoint, and a
+            # white stroke on that fill erases the border of every kommun
+            # sitting close to riket, which is most of them.
+            "color": "#C8CCD2",
             "weight": 0.5,
-            "fillOpacity": 0.75,
+            "fillOpacity": 0.8,
         }
 
     # Highlight function
@@ -306,13 +413,7 @@ def render_choropleth(
     ).add_to(m)
 
     # Add responsive legend as custom HTML element
-    legend_html = _build_responsive_legend(
-        colors=map_layer.colors,
-        vmin=map_layer.vmin,
-        vmax=map_layer.vmax,
-        caption=map_layer.legend_caption,
-        diverging=map_layer.diverging,
-    )
+    legend_html = _build_responsive_legend(map_layer)
     m.get_root().html.add_child(folium.Element(legend_html))
 
     # Hide the selection rectangle that appears on click
@@ -364,40 +465,58 @@ def build_base_map() -> folium.Map:
     )
 
 
-def _build_responsive_legend(
-    colors: list[str],
-    vmin: float,
-    vmax: float,
-    caption: str,
-    diverging: bool = True,
-) -> str:
+def _build_responsive_legend(layer: MapLayer) -> str:
     """Build a responsive HTML legend that scales with map container width.
 
-    The middle tick used to be a hardcoded "0", which was right while the only
-    layer was a zero-centred z-score and wrong the moment a sequential level
-    scale arrived: the position ramp runs 80–130 and was labelled 80 · 0 · 130.
-    The midpoint is now computed, and signs are shown only for scales where a
-    sign means something.
+    Both the gradient and the tick labels are positioned by where a value
+    actually falls in the domain, not by how many colours precede it. That
+    matters because the position ramp spans 80 to 130 and is centred on 100:
+    an evenly spaced bar would print 80 / 105 / 130 and put the neutral colour
+    under the wrong number. The middle tick used to be a hardcoded "0", which
+    was right while the only layer was a zero-centred z-score and wrong the
+    moment a level scale arrived.
 
     Args:
-        colors: List of hex color strings for the gradient.
-        vmin: Minimum value for the scale.
-        vmax: Maximum value for the scale.
-        caption: Legend caption text.
-        diverging: Whether the scale is signed and centred on its midpoint.
+        layer: The layer being drawn.
 
     Returns:
         HTML string for the legend element.
     """
-    fmt = "+.0f" if diverging else ".0f"
-    low_label = format(vmin, fmt)
-    high_label = format(vmax, fmt)
-    mid_label = format((vmin + vmax) / 2.0, fmt)
-    # Build CSS gradient from colors
+    span = layer.vmax - layer.vmin
+
+    def pct(value: float) -> float:
+        """Where a domain value sits along the bar, 0 to 100."""
+        return (value - layer.vmin) / span * 100.0
+
+    fmt = "+.0f" if layer.signed else ".0f"
+
+    def label_for(value: float) -> str:
+        """Zero takes no sign, even on a signed scale: "+0" is not a reading."""
+        return "0" if layer.signed and value == 0 else format(value, fmt)
+
+    # Gradient stops placed at their own domain positions.
     gradient_stops = ", ".join(
-        f"{c} {i * 100 / (len(colors) - 1):.1f}%"
-        for i, c in enumerate(colors)
+        f"{c} {pct(v):.1f}%" for c, v in zip(layer.colors, layer.stops)
     )
+
+    # Ticks over the bar: the midpoint reads solid, the band cuts faint.
+    marks = f'<i class="kss-legend-mid" style="left:{pct(layer.midpoint):.1f}%"></i>'
+    marks += "".join(
+        f'<i style="left:{pct(t):.1f}%"></i>' for t in layer.legend_ticks
+    )
+
+    # Labels.  The ends are pinned to the ends of the bar so they cannot run
+    # off it; everything between is centred on its own tick.
+    labels = [
+        f'<span class="kss-end" style="left:0">{label_for(layer.vmin)}</span>',
+        f'<span class="kss-end" style="right:0">{label_for(layer.vmax)}</span>',
+        f'<span class="kss-mid" style="left:{pct(layer.midpoint):.1f}%">'
+        f'{label_for(layer.midpoint)}</span>',
+    ]
+    labels += [
+        f'<span style="left:{pct(t):.1f}%">{label_for(t)}</span>'
+        for t in layer.legend_ticks
+    ]
 
     return f"""
     <style>
@@ -429,28 +548,48 @@ def _build_responsive_legend(
             text-overflow: ellipsis;
         }}
         .kss-legend-bar {{
+            position: relative;
             height: 8px;
             width: 100%;
             background: linear-gradient(to right, {gradient_stops});
             border-radius: 2px;
             margin-bottom: 3px;
         }}
+        .kss-legend-bar i {{
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 1px;
+            background: rgba(26, 26, 46, 0.25);
+        }}
+        .kss-legend-bar i.kss-legend-mid {{
+            background: rgba(26, 26, 46, 0.55);
+        }}
         .kss-legend-labels {{
-            display: flex;
-            justify-content: space-between;
+            position: relative;
+            height: 12px;
             color: #6B7280;
             font-size: 9px;
+        }}
+        .kss-legend-labels span {{
+            position: absolute;
+            top: 0;
+            white-space: nowrap;
+            transform: translateX(-50%);
+        }}
+        .kss-legend-labels span.kss-end {{
+            transform: none;
+        }}
+        .kss-legend-labels span.kss-mid {{
+            color: #1A1A2E;
+            font-weight: 600;
         }}
     </style>
     <div class="kss-legend-container">
         <div class="kss-legend">
-            <div class="kss-legend-caption">{caption}</div>
-            <div class="kss-legend-bar"></div>
-            <div class="kss-legend-labels">
-                <span>{low_label}</span>
-                <span>{mid_label}</span>
-                <span>{high_label}</span>
-            </div>
+            <div class="kss-legend-caption">{layer.legend_caption}</div>
+            <div class="kss-legend-bar">{marks}</div>
+            <div class="kss-legend-labels">{"".join(labels)}</div>
         </div>
     </div>
     """
